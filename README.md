@@ -9,6 +9,7 @@ their location within the list.
 **Clinique Liquid Facial Soap - Mild**
 
 - This product is described as "oil-free", "dermatologist developed", and "non-comedogenic".
+- However, it's second ingredient (see below) is comedogenic.
 
 ```python
 ingredients = 'Water / Aqua / Eau, Sodium Laureth Sulfate, Sodium Chloride, Cocamidopropyl Hydroxysultaine, Lauramidopropyl Betaine, Sodium Cocoyl Sarcosinate, Tea-Cocoyl Glutamate, Di-PPG-2 Myreth-10 Adipate, Aloe Barbadensis Leaf Juice, PEG-120 Methyl Glucose Dioleate, Sucrose, Sodium Hyaluronate, Cetyl Triethylmonium Dimethicone PEG-8 Succinate, Butylene Glycol, Hexylene Glycol, Polyquaternium-7, Laureth-2, Caprylyl Glycol, Sodium Sulfate, Tocopheryl Acetate, EDTA, Disodium EDTA, Phenoxyethanol'
@@ -20,7 +21,7 @@ comedogenic(ingredients)
 
 Output:
 
-|    | ingredient             |
-| :- | :--------------------- |
-| 15 | hexylene glycol        |
-| 2  | sodium laureth sulfate |
+| index   | ingredient             |
+| :------ | :--------------------- |
+| 15      | hexylene glycol        |
+| 2       | sodium laureth sulfate |
