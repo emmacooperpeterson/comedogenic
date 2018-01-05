@@ -1,0 +1,24 @@
+*This is a work in progress.*
+
+Provide a list of skincare/makeup ingredients as a string, and receive
+a dataframe with any comedogenic ingredients in that list, along with
+their location within the list.
+
+Example:
+
+**Clinique Liquid Facial Soap - Mild**
+
+This product is described as "oil-free", "dermatologist developed", and "non-comedogenic".
+
+```python
+ingredients = 'Water / Aqua / Eau, Sodium Laureth Sulfate, Sodium Chloride, Cocamidopropyl Hydroxysultaine, Lauramidopropyl Betaine, Sodium Cocoyl Sarcosinate, Tea-Cocoyl Glutamate, Di-PPG-2 Myreth-10 Adipate, Aloe Barbadensis Leaf Juice, PEG-120 Methyl Glucose Dioleate, Sucrose, Sodium Hyaluronate, Cetyl Triethylmonium Dimethicone PEG-8 Succinate, Butylene Glycol, Hexylene Glycol, Polyquaternium-7, Laureth-2, Caprylyl Glycol, Sodium Sulfate, Tocopheryl Acetate, EDTA, Disodium EDTA, Phenoxyethanol'
+```
+
+```python
+comedogenic(ingredients)
+```
+
+|    | ingredient             |
+| :- | :--------------------- |
+| 15 | hexylene glycol        |
+| 2  | sodium laureth sulfate |
