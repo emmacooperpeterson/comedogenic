@@ -4,6 +4,9 @@ Provide a list of skincare/makeup ingredients as a string, and receive
 a dataframe with any comedogenic ingredients in that list, along with
 their location within the list.
 
+**Sources:**
+- Comedogenic ingredients were found [here](https://www.acne.org/comedogenic-list.html) and [here](http://www.caryskincare.com/acnecomedogeniclist.html).
+
 # Example:
 
 **Clinique Liquid Facial Soap - Mild**
