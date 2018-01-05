@@ -28,3 +28,7 @@ Output:
 | :------ | :--------------------- |
 | 15      | hexylene glycol        |
 | 2       | sodium laureth sulfate |
+
+
+# Next Steps:
+- This currently tests only for exact matches of ingredient names. I'd like to add fuzzy matching, since the ingredient names are so complicated and typos therefore seem likely.
