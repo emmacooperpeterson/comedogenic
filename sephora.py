@@ -1,4 +1,5 @@
 from bs4 import BeautifulSoup as bs
+import pandas as pd
 import requests
 import re
 
@@ -60,13 +61,12 @@ class Sephora:
             product.clean_ingredients()
 
             self.product_info.append({
-                product.name: {
-                    "link": product.base_url + product.link_suffix,
-                    "brand": product.brand,
-                    "price": product.price,
-                    "raw ingredients": product.raw_ingredients,
-                    "ingredients": product.ingredients
-                }
+                "name": product.name,
+                "link": product.base_url + product.link_suffix,
+                "brand": product.brand,
+                "price": product.price,
+                "raw ingredients": product.raw_ingredients,
+                "ingredients": product.ingredients
             })
 
 
@@ -163,6 +163,28 @@ class Product:
         self.ingredients = [ingr.strip() for ingr in ingredients]
 
 
+def make_ingredient_table(product_info):
+    product_names = []
+    product_ingredients = []
+
+    for product in product_info:
+        ingredients = product["ingredients"]
+        product_ingredients.append(ingredients)
+        product_names.append([product["name"]] * len(ingredients))
+
+    product_names = [x for lst in product_names for x in lst]
+    product_ingredients = [x for lst in product_ingredients for x in lst]
+
+    df = pd.DataFrame(list(zip(product_names, product_ingredients)),
+                      columns =['name', 'ingredient'])
+
+    # add ingredient rank
+    df["rank"] = df.groupby(["name"]).cumcount()+1
+
+    return(df)
+
+
+
 
 
 if __name__ == '__main__':
@@ -171,3 +193,4 @@ if __name__ == '__main__':
     sephora.get_category_links("skincare")
     sephora.get_product_links()
     sephora.get_all_product_info()
+    ingredient_table = make_ingredient_table(sephora.product_info)
