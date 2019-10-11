@@ -67,6 +67,7 @@ class Sephora:
                 "price": product.price,
                 "raw ingredients": product.raw_ingredients,
                 "ingredients": product.ingredients
+                # can we add category? e.g. moisturizer, treatment, etc.
             })
 
 
