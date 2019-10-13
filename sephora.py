@@ -1,32 +1,67 @@
 from bs4 import BeautifulSoup as bs
+from sephora_setup import *
 import pandas as pd
 import requests
 import re
 
-PRODUCT_CLASS = "css-pz80c5" #div
-BRAND_CLASS = "css-euydo4" #span
-NAME_CLASS = "css-0" #span
-PRICE_CLASS = "css-14hdny6" #div
-PRODUCT_TYPE_CLASS = "css-or7ouu" #a
-PRODUCT_LINK_CLASS = "css-ix8km1" #a
+
+
+def get_soup(url, class_type, class_name): # THIS DOESNT WORK?
+    page = requests.get(url)
+    soup = bs(page.content, "html.parser")
+    result = soup.findall(class_type, class_ = class_name)
+    return result
 
 
 
 class Sephora:
+    """
+    A class used to represent Sephora.
+
+    Attributes
+    ----------
+    category_links: list of str
+        links to category pages (e.g. Moisurizers, Cleansers, etc.)
+    product_links: list of str
+        links to product pages (found on category pages)
+    product_info: list of dict
+        dictionary for each product
+    """
+
     def __init__(self):
-        self.product_type_link_class = PRODUCT_TYPE_CLASS
-        self.base_url = "https://www.sephora.com/"
-        self.category_links = []
+        self.subcategory_links = []
         self.product_links = []
         self.product_info = []
 
-    def get_category_links(self, category_name):
-        # get links for each category page
-        url = self.base_url + "shop/" + category_name
+
+    def get_subcategory_links(self, category_name: str):
+        """
+        Description
+        -----------
+        Get links to all the subcategories associated with a given category,
+        e.g. category = skincare, subcategories = cleansers, face masks, etc.
+
+        Currently accepts category_name = "skincare" or "makeup-cosmetics"
+
+        Parameters
+        ----------
+        category_name: str
+            name of the category
+
+        Returns
+        -------
+        Updates self.subcategory_links to include links for specified category
+        """
+
+        assert category_name in ["skincare", "makeup-cosmetics"], (
+            "category_name must be skincare or makeup-cosmetics.")
+
+        url = BASE_URL + "shop/" + category_name
         page = requests.get(url)
         soup = bs(page.content, 'html.parser')
-        categories = soup.find_all("a", class_ = self.product_type_link_class)
+        categories = soup.find_all("a", class_ = PRODUCT_CATEGORY_CLASS)
 
+        # list of subcategories to skip
         exclude = [
             "/shop/skin-care-sets-travel-value",
             "/shop/mini-skincare",
@@ -37,134 +72,162 @@ class Sephora:
             "/shop/makeup-applicators",
             "/shop/makeup-accessories",
             "/shop/nails-makeup"
-            ]
+        ]
 
         links = [c["href"] for c in categories if c not in exclude]
-        self.category_links += links
-
-    def get_product_links(self):
-        # get links to every product listed on every category page
-        products = []
-        for link in self.category_links[15:16]: # subsetting for testing purposes
-            category = Category(link)
-            category.get_category()
-            products.append(category.products)
-
-        self.product_links = [p for lst in products for p in lst]
+        self.subcategory_links += links
 
 
-    def get_all_product_info(self):
-        # get product info for every product listed on every category page
-        for link in self.product_links:
-            product = Product(link)
-            product.get_product_details()
-            product.clean_ingredients()
+    def get_product_links(self, subcategory_link):
+        """
+        Description
+        -----------
+        Get links to every product on a given subcategory page
 
-            self.product_info.append({
-                "name": product.name,
-                "link": product.base_url + product.link_suffix,
-                "brand": product.brand,
-                "price": product.price,
-                "raw ingredients": product.raw_ingredients,
-                "ingredients": product.ingredients
-                # can we add category? e.g. moisturizer, treatment, etc.
-            })
+        Parameters
+        ----------
+        subcategory_link: str
+            link suffix for a subcategory page, e.g. "/shop/cleanser"
 
+        Returns
+        -------
+        Updates self.product_links to include links for specified subcategory
+        """
 
-
-class Category:
-    def __init__(self, link_suffix):
-        self.base_url = "https://www.sephora.com"
-        self.category_name = link_suffix
-        self.product_link_class = PRODUCT_LINK_CLASS
-        self.products = []
-        self.test = None
-
-    def get_category(self):
-        # get links to every product in a given category
-        url = self.base_url + self.category_name
+        url = BASE_URL + subcategory_link
         page = requests.get(url)
         soup = bs(page.content, "html.parser")
-        products = soup.find_all("a", class_ = self.product_link_class)
+        products = soup.find_all("a", class_ = PRODUCT_LINK_CLASS)
         links = [c["href"] for c in products]
-
-        for link in links:
-            self.products.append(link)
+        self.product_links += links
 
 
 
-class Product:
-    def __init__(self, link_suffix):
-        self.base_url = "https://www.sephora.com"
-        self.link_suffix = link_suffix
-        self.name = None
-        self.brand = None
-        self.price = None
-        self.description = None
-        self.usage = None
-        self.ingredients = None
-        self.raw_ingredients = None
-        self.first = None
-        self.rest = None
+    def get_product_info(self, product_link):
+        """
+        Description
+        -----------
+        Get product info for a given product on a given subcategory page
 
-    def get_product_details(self):
-        # get information about a given product
-        page = requests.get(self.base_url + self.link_suffix)
+        Parameters
+        ----------
+        product_link:str
+            link suffix for a product page, e.g.
+            "/product/fablantis-P447792?icid2=products grid:p447792"
+
+        Returns
+        -------
+        Updates self.product_info to include a dictionary
+        for the specified product
+        """
+
+        url = BASE_URL + product_link
+        page = requests.get(url)
         soup = bs(page.content, 'html.parser')
 
+        name = soup.find("span", class_ = NAME_CLASS).get_text()
+
+        # skip kits/sets of products
+        pattern = re.compile(r"set|kit", re.IGNORECASE)
+        if pattern.search(name):
+            return None
+
+        # FIXME (doesn't work for all products)
+        #type = soup.find("a", class_ = PRODUCT_TYPE_CLASS).get_text()
         product_details = soup.find_all("div", class_ = PRODUCT_CLASS)
 
         if len(product_details) > 0:
-            self.description = product_details[0].get_text()
+            description = product_details[0].get_text()
 
         if len(product_details) > 1:
-            self.usage = product_details[1].get_text()
+            usage = product_details[1].get_text()
 
         if len(product_details) > 2:
-            self.raw_ingredients = product_details[2].get_text()
+            raw_ingredients = product_details[2].get_text()
 
         brand = soup.find("span", class_ = BRAND_CLASS).get_text()
-        self.brand = brand
-
-        name = soup.find("span", class_ = NAME_CLASS).get_text()
-        self.name = name
-
         price = soup.find("div", class_ = PRICE_CLASS).get_text()
-        self.price = price
 
-    def clean_ingredients(self):
+        # convert the raw ingredient string to a list of formatted ingredients
+        # formatted = lowercase, no punctuation, etc.
+        formatted_ingredients = self.format_ingredients(raw_ingredients)
+
+        self.product_info.append({
+            "name": name,
+            "link": url,
+            "brand": brand,
+            "price": price,
+            "raw ingredients": raw_ingredients,
+            "ingredients": formatted_ingredients,
+            #"type": type
+        })
+
+
+    def format_ingredients(self, raw_ingredients):
+        """
+        Description
+        -----------
+        TODO: Update this function to better handle all ingredient lists
+
+        Create a list of formatted ingredients from the raw_ingredients string
+        e.g. raw_ingredients = "Aqua (Water), Glycerin, Niacinamide"
+             formatted_ingredients = ["aqua", "glycerin", "nicacinamide"]
+
+        Parameters
+        ----------
+        raw_ingredients:str
+            string listing all ingredients, e.g.
+            "Water, Simmondsia Chinensis (Jojoba) Seed Oil,
+                Butyrospermum Parkii (Shea) Butter, ..."
+
+        Returns
+        -------
+        formatted_ingredients:list of str
+            List of formatted ingredient strings
+        """
+
+        ingredients = []
+
         # remove parentheticals
+        # e.g. Titanium Dioxide (CI 77891) -> Titanium Dioxide
         regex = r"\({1}.{1,20}\){1}\s"
-        self.raw_ingredients = re.sub(regex, "", self.raw_ingredients)
+        raw_ingredients = re.sub(regex, "", raw_ingredients)
 
         # remove hyphens
         regex = r"\-"
-        self.raw_ingredients = re.sub(regex, " ", self.raw_ingredients)
+        raw_ingredients = re.sub(regex, " ", raw_ingredients)
 
         # remove weird line breaks / characters
         for pattern in [u"\xa0", u"\u2028", u"\r", u"\t", u"\n"]:
-            self.raw_ingredients = self.raw_ingredients.replace(pattern, u"")
+            raw_ingredients = raw_ingredients.replace(pattern, u"")
 
+        # because of the way the ingredient lists are set up on Sephora.com,
+        # we need special regex to identify where the first ingredient begins.
+        # we then use that as the starting point to identify the rest
         first_ingredient_regex = r"\.([A-Z]+[\w\s]*)\,|[\.\s?]\s([A-Z]+[\w\s]*)\,"
         remaining_ingredients_regex = r"[\,]\s([A-Z]+[\w\s]*)"
 
-        ingredients = []
-        first_ingredient = re.search(first_ingredient_regex, self.raw_ingredients)
+        # TODO: make this a try/except
+        first_ingredient = re.search(first_ingredient_regex, raw_ingredients)
 
+        # if the above regex didn't work, try another way
         if not first_ingredient:
-            first_ingredient = re.search(r"([A-Z][a-z]*)\,", self.raw_ingredients)
+            first_ingredient = re.search(r"([A-Z][a-z]*)\,", raw_ingredients)
 
-        if first_ingredient:
-            ingredients.append(first_ingredient.group().strip("., \r"))
-        else:
-            print(self.raw_ingredients)
+        ingredients.append(first_ingredient.group().strip("., \r"))
 
-        ingredients += re.findall(remaining_ingredients_regex, self.raw_ingredients)
+        ingredients += re.findall(remaining_ingredients_regex, raw_ingredients)
 
-        self.ingredients = [ingr.strip() for ingr in ingredients]
+        clean_ingredients = [ingr.strip().lower() for ingr in ingredients]
+        return clean_ingredients
 
 
-def make_ingredient_table(product_info):
+
+
+
+
+
+def make_ingredient_table(product_info: list):
     product_names = []
     product_ingredients = []
 
@@ -174,7 +237,7 @@ def make_ingredient_table(product_info):
         product_names.append([product["name"]] * len(ingredients))
 
     product_names = [x for lst in product_names for x in lst]
-    product_ingredients = [x for lst in product_ingredients for x in lst]
+    product_ingredients = [x.lower() for lst in product_ingredients for x in lst]
 
     df = pd.DataFrame(list(zip(product_names, product_ingredients)),
                       columns =['name', 'ingredient'])
@@ -185,13 +248,31 @@ def make_ingredient_table(product_info):
     return(df)
 
 
+def make_product_table(product_info: list):
+    products = product_info
+
+    for p in products: #FIXME
+        p.pop("ingredients")
+        p.pop("raw ingredients")
+
+    product_df = pd.DataFrame(products)
+
+    return product_df
+
 
 
 
 if __name__ == '__main__':
     sephora = Sephora()
-    sephora.get_category_links("makeup-cosmetics")
-    sephora.get_category_links("skincare")
-    sephora.get_product_links()
-    sephora.get_all_product_info()
-    ingredient_table = make_ingredient_table(sephora.product_info)
+    sephora.get_subcategory_links("makeup-cosmetics")
+    sephora.get_subcategory_links("skincare")
+
+    for subcategory_link in sephora.subcategory_links[15:16]: # subsetting to test
+        sephora.get_product_links(subcategory_link)
+
+    for product_link in sephora.product_links:
+        sephora.get_product_info(product_link)
+    #ingredient_table = make_ingredient_table(sephora.product_info)
+    #ingredient_table.to_csv("ingredient_table.csv", index = False)
+    #product_table = make_product_table(sephora.product_info)
+    #product_table.to_csv("product_table.csv", index = False)
