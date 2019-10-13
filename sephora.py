@@ -246,7 +246,7 @@ class Sephora:
 
 
 
-def make_ingredient_table(product_info: list):
+def make_ingredient_table(product_info: list) -> pd.DataFrame:
     product_names = []
     product_ingredients = []
 
@@ -268,7 +268,7 @@ def make_ingredient_table(product_info: list):
 
 
 
-def make_product_table(product_info: list):
+def make_product_table(product_info: list) -> pd.DataFrame:
     products = product_info
 
     for p in products: #FIXME
@@ -281,7 +281,9 @@ def make_product_table(product_info: list):
 
 
 
-def main():
+
+if __name__ == '__main__':
+    
     sephora = Sephora()
 
     #for subcategory in SUBCATEGORIES: idk why this doesn't work
@@ -298,16 +300,10 @@ def main():
         print(f"getting product info for product {i+1} of {len(sephora.product_links)}")
         sephora.get_product_info(product)
 
-    #ingredient_table = make_ingredient_table(sephora.product_info)
+    ingredient_table = make_ingredient_table(sephora.product_info)
     #ingredient_table.to_csv("ingredient_table.csv", index = False)
     #product_table = make_product_table(sephora.product_info)
     #product_table.to_csv("product_table.csv", index = False)
-
-
-
-
-if __name__ == '__main__':
-    main()
 
 
 
@@ -315,3 +311,4 @@ if __name__ == '__main__':
     # improve the table functions
     # document table functions
     # create a main() function
+    # update functions to crawl every page of subcategories (not just search on first page)
