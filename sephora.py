@@ -6,10 +6,27 @@ import re
 
 
 
-def get_soup(url, class_type, class_name): # THIS DOESNT WORK?
+def search_url(url, class_type: str, class_tag: str):
+    """
+    Description
+    -----------
+    Helper function to search a webpage for a given class type and tag
+
+    Parameters
+    ----------
+    class_type: str
+        e.g., "a", "div", "span", etc.
+    class_tag:str
+        the specific tag to search for, e.g. "css-or7ouu"
+        (these are defined in sephora_setup.py)
+
+    Returns
+    -------
+    bs4.element.ResultSet object (iterable)
+    """
     page = requests.get(url)
     soup = bs(page.content, "html.parser")
-    result = soup.findall(class_type, class_ = class_name)
+    result = soup.find_all(class_type, class_ = class_tag)
     return result
 
 
@@ -56,10 +73,11 @@ class Sephora:
         assert category_name in ["skincare", "makeup-cosmetics"], (
             "category_name must be skincare or makeup-cosmetics.")
 
-        url = BASE_URL + "shop/" + category_name
-        page = requests.get(url)
-        soup = bs(page.content, 'html.parser')
-        categories = soup.find_all("a", class_ = PRODUCT_CATEGORY_CLASS)
+        categories = search_url(
+            url = BASE_URL + "shop/" + category_name,
+            class_type = "a",
+            class_tag = PRODUCT_CATEGORY_CLASS
+        )
 
         # list of subcategories to skip
         exclude = [
@@ -94,10 +112,12 @@ class Sephora:
         Updates self.product_links to include links for specified subcategory
         """
 
-        url = BASE_URL + subcategory_link
-        page = requests.get(url)
-        soup = bs(page.content, "html.parser")
-        products = soup.find_all("a", class_ = PRODUCT_LINK_CLASS)
+        products = search_url(
+            url = BASE_URL + subcategory_link,
+            class_type = "a",
+            class_tag = PRODUCT_LINK_CLASS
+        )
+
         links = [c["href"] for c in products]
         self.product_links += links
 
@@ -134,6 +154,8 @@ class Sephora:
 
         # FIXME (doesn't work for all products)
         #type = soup.find("a", class_ = PRODUCT_TYPE_CLASS).get_text()
+        brand = soup.find("span", class_ = BRAND_CLASS).get_text()
+        price = soup.find("div", class_ = PRICE_CLASS).get_text()
         product_details = soup.find_all("div", class_ = PRODUCT_CLASS)
 
         if len(product_details) > 0:
@@ -144,9 +166,6 @@ class Sephora:
 
         if len(product_details) > 2:
             raw_ingredients = product_details[2].get_text()
-
-        brand = soup.find("span", class_ = BRAND_CLASS).get_text()
-        price = soup.find("div", class_ = PRICE_CLASS).get_text()
 
         # convert the raw ingredient string to a list of formatted ingredients
         # formatted = lowercase, no punctuation, etc.
@@ -163,7 +182,7 @@ class Sephora:
         })
 
 
-    def format_ingredients(self, raw_ingredients):
+    def format_ingredients(self, raw_ingredients) -> list:
         """
         Description
         -----------
@@ -248,6 +267,7 @@ def make_ingredient_table(product_info: list):
     return(df)
 
 
+
 def make_product_table(product_info: list):
     products = product_info
 
@@ -261,18 +281,37 @@ def make_product_table(product_info: list):
 
 
 
-
-if __name__ == '__main__':
+def main():
     sephora = Sephora()
-    sephora.get_subcategory_links("makeup-cosmetics")
-    sephora.get_subcategory_links("skincare")
 
-    for subcategory_link in sephora.subcategory_links[15:16]: # subsetting to test
-        sephora.get_product_links(subcategory_link)
+    #for subcategory in SUBCATEGORIES: idk why this doesn't work
+    for subcategory in ["makeup-cosmetics", "skincare"]:
+        sephora.get_subcategory_links(subcategory)
 
-    for product_link in sephora.product_links:
-        sephora.get_product_info(product_link)
+    for i, subcategory in enumerate(sephora.subcategory_links[15:16]): # subsetting to test
+        print(f"getting product links for subcategory {i+1} of {len(sephora.subcategory_links[15:16])}")
+        sephora.get_product_links(subcategory)
+
+    print("")
+
+    for i, product in enumerate(sephora.product_links):
+        print(f"getting product info for product {i+1} of {len(sephora.product_links)}")
+        sephora.get_product_info(product)
+
     #ingredient_table = make_ingredient_table(sephora.product_info)
     #ingredient_table.to_csv("ingredient_table.csv", index = False)
     #product_table = make_product_table(sephora.product_info)
     #product_table.to_csv("product_table.csv", index = False)
+
+
+
+
+if __name__ == '__main__':
+    main()
+
+
+
+# TODO:
+    # improve the table functions
+    # document table functions
+    # create a main() function
