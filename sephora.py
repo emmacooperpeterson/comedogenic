@@ -33,20 +33,19 @@ def get_sephora_products():
         sephora.get_subcategory_links(subcategory)
 
     n_subcategories = len(sephora.subcategory_links)
-    print(f"found {n_subcategories} subcategories\n")
+    print(f"found {n_subcategories} subcategories\n\n")
 
     # for each subcategory page, get links to all product pages
-    for i, subcategory in enumerate(sephora.subcategory_links[0:1]): # SUBSETTING FOR TESTING
-        print(f"getting product links for subcategory {i+1}/{n_subcategories}")
-        print(subcategory)
-        sephora.get_product_links(subcategory)
+    for i, subcategory in enumerate(sephora.subcategory_links[0:5]): # SUBSETTING FOR TESTING
+        print(f"getting product links for subcategory {i+1}/{n_subcategories} -> {subcategory}")
+        sephora.get_product_links(subcategory, testing = True)
 
     n_products = len(sephora.product_links)
-    print(f"found {n_products} products\n")
+    print(f"\nfound {n_products} products\n\n")
 
     # for each product page, get all product information
     for i, product in enumerate(sephora.product_links[0:5]): # SUBSETTING FOR TESTING
-        print(f"getting product info for product {i+1}/{n_products}")
+        print(f"\ngetting product info for product {i+1}/{n_products}")
         sephora.get_product_info(product)
 
     # create and save dataframes with product info
@@ -108,18 +107,20 @@ class Sephora:
         assert category_name in ["skincare", "makeup-cosmetics"], (
             "category_name must be 'skincare' or 'makeup-cosmetics'")
 
-        categories = search_url(
+        subcategories = search_url(
             url = BASE_URL + "shop/" + category_name,
             class_type = "a",
             class_tag = PRODUCT_CATEGORY_CLASS
         )
 
-        # EXCLUDE_SUBCATEGORIES listed in sephora_setup.py
-        links = [c["href"] for c in categories if c not in EXCLUDE_SUBCATEGORIES]
+        # get the links
+        # EXCLUDE_SUBCATEGORIES defined in sephora_setup.py
+        links = [s["href"] for s in subcategories]
+        links = [s for s in links if s not in EXCLUDE_SUBCATEGORIES]
         self.subcategory_links += links
 
 
-    def get_product_links(self, subcategory_link: str):
+    def get_product_links(self, subcategory_link: str, testing: bool = False):
         """
         Description
         -----------
@@ -137,42 +138,52 @@ class Sephora:
         ----------
         subcategory_link: str
             link suffix for a subcategory page, e.g. "/shop/cleanser"
+        testing: bool
+            if true, skip the scrolling code and only search the top of the page
 
         Returns
         -------
         Updates self.product_links with links for the specified subcategory
         """
 
-        # setup for scrolling
-        browser = webdriver.Chrome(ChromeDriverManager().install())
-        browser.get(BASE_URL + subcategory_link + "?pageSize=300")
+        if testing:
+            products = search_url(
+                url = BASE_URL + subcategory_link,
+                class_type = "a",
+                class_tag = PRODUCT_LINK_CLASS
+            )
 
-        # scroll to the bottom, wait 2 seconds, continue until done
-        get_length_of_page = """
-            window.scrollTo(0, document.body.scrollHeight);
-            var lenOfPage = document.body.scrollHeight;
-            return lenOfPage;"""
+        else:
+            # setup for scrolling
+            browser = webdriver.Chrome(ChromeDriverManager().install())
+            browser.get(BASE_URL + subcategory_link + "?pageSize=300")
 
-        length_of_page = browser.execute_script(get_length_of_page)
+            # scroll to the bottom, wait 2 seconds, continue until done
+            get_length_of_page = """
+                window.scrollTo(0, document.body.scrollHeight);
+                var lenOfPage = document.body.scrollHeight;
+                return lenOfPage;"""
 
-        finished = False
-        while not finished:
-            last_count = length_of_page
-            time.sleep(3)
             length_of_page = browser.execute_script(get_length_of_page)
-            if last_count == length_of_page:
-                finished = True
 
-        # now we can grab the full source code
-        source_code = browser.page_source
-        browser.close()
+            finished = False
+            while not finished:
+                last_count = length_of_page
+                time.sleep(3)
+                length_of_page = browser.execute_script(get_length_of_page)
+                if last_count == length_of_page:
+                    finished = True
 
-        # use BeautifulSoup to search for the product links
-        soup = bs4.BeautifulSoup(source_code, "html.parser")
-        products = soup.find_all("a", class_ = PRODUCT_LINK_CLASS)
+            # now we can grab the full source code
+            source_code = browser.page_source
+            browser.close()
+
+            # use BeautifulSoup to search for the product links
+            soup = bs4.BeautifulSoup(source_code, "html.parser")
+            products = soup.find_all("a", class_ = PRODUCT_LINK_CLASS)
 
         links = [c["href"] for c in products]
-        print(f"{len(links)} products found")
+        print(f"{len(links)} products found\n")
         self.product_links += links
 
 
@@ -201,8 +212,9 @@ class Sephora:
         name = soup.find("span", class_ = NAME_CLASS).get_text()
 
         # skip kits/sets of products
-        pattern = re.compile(r"set|kit", re.IGNORECASE)
+        pattern = re.compile(r"\sset\s|\skit\s", re.IGNORECASE)
         if pattern.search(name):
+            print(f"skipping set: {name}")
             return None
 
         # FIXME (doesn't work for all products)
@@ -226,9 +238,17 @@ class Sephora:
         if product_details_length > 2:
             raw_ingredients = product_details[2].get_text()
 
+        # skip kits/sets of products
+        if pattern.search(description):
+            print(f"skipping set: {name}")
+            return None
+
         # convert the raw ingredient string to a list of formatted ingredients
         # formatted = lowercase, no punctuation, etc.
-        formatted_ingredients = self.format_ingredients(raw_ingredients)
+        formatted_ingredients = self.format_ingredients(
+            raw_ingredients = raw_ingredients,
+            product_name = name
+        )
 
         self.product_info.append({
             "name": name,
@@ -241,7 +261,7 @@ class Sephora:
         })
 
 
-    def format_ingredients(self, raw_ingredients: str) -> list:
+    def format_ingredients(self, raw_ingredients: str, product_name: str) -> list:
         """
         Description
         -----------
@@ -255,6 +275,7 @@ class Sephora:
             string listing all ingredients, e.g.
             "Water, Simmondsia Chinensis (Jojoba) Seed Oil,
                 Butyrospermum Parkii (Shea) Butter, ..."
+        product_name: str
 
         Returns
         -------
@@ -262,58 +283,51 @@ class Sephora:
             List of formatted ingredient strings
         """
 
-        # handle case when no ingredients were found on the page
+        # move on if no ingredient string was found
         if not raw_ingredients:
-            return[None]
+            return [None]
 
-        ingredients = []
+        # remove the language that can appear at the end of inci lists
+        match = "Clean at Sephora products are formulated without:"
+        raw_ingredients = raw_ingredients.split(match, 1)[0]
+
+        match = "This product is vegan and gluten-free."
+        raw_ingredients = raw_ingredients.replace(match, "")
 
         # remove parentheticals
         # e.g. Titanium Dioxide (CI 77891) -> Titanium Dioxide
+        regex = r"\({1}.{1,20}\){1}\s"
+        raw_ingredients = re.sub(regex, "", raw_ingredients)
+
+        # locate ingredient list within the full ingredient string
+        # the first regex looks for a period followed by a new line
+        # to mark the possible beginning of the ingredient list.
+        # the ingredient list itself then includes letters, forward slashes,
+        # commas, spaces, numbers, and/or hyphens.
+        # the end of the list is denoted by another period and new line.
+        # if that doesn't work, look for Water|Aqua|Eau – usually 1st ingredient
         try:
-            regex = r"\({1}.{1,20}\){1}\s"
-            raw_ingredients = re.sub(regex, "", raw_ingredients)
+            raw_ingredients = re.search(
+                r"\.\n([a-zA-Z\/?,\s()\d–]+).\n",
+                raw_ingredients).group()
         except:
-            pass
+            try:
+                raw_ingredients = re.search(
+                    r"\s{2}([Water|Aqua|Eau].*)\.",
+                    raw_ingredients).group()
+            except:
+                print(f"failed to find ingredients for {product_name}")
+                pass # add more regex patterns here as needed
 
-        # remove hyphens
-        try:
-            regex = r"\-"
-            raw_ingredients = re.sub(regex, " ", raw_ingredients)
-        except:
-            pass
+        # remove new line characters and periods
+        raw_ingredients = re.sub(r"|\n|\.", "", raw_ingredients)
 
-        # remove weird line breaks / characters
-        try:
-            for pattern in [u"\xa0", u"\u2028", u"\r", u"\t", u"\n"]:
-                raw_ingredients = raw_ingredients.replace(pattern, u"")
-        except:
-            pass
+        # split into a list of strings
+        ingredients = raw_ingredients.split(", ")
+        formatted_ingredients = [ingr.strip().lower() for ingr in ingredients]
+        print(f"found {len(formatted_ingredients)} ingredients: {product_name}")
 
-        # because of the way the ingredient lists are set up on Sephora.com,
-        # we need special regex to identify where the first ingredient begins.
-        # we then use that as the starting point to identify the rest
-        first_ingredient_regex = r"\.([A-Z]+[\w\s]*)\,|[\.\s?]\s([A-Z]+[\w\s]*)\,"
-        remaining_ingredients_regex = r"[\,]\s([A-Z]+[\w\s]*)"
-
-        first_ingredient = re.search(first_ingredient_regex, raw_ingredients)
-
-        # if the above regex didn't work, try another way
-        if not first_ingredient:
-            first_ingredient = re.search(r"([A-Z][a-z]*)\,", raw_ingredients)
-
-        try:
-            ingredients.append(first_ingredient.group().strip("., \r"))
-        except:
-            pass
-
-        try:
-            ingredients += re.findall(remaining_ingredients_regex, raw_ingredients)
-        except:
-            pass
-
-        clean_ingredients = [ingr.strip().lower() for ingr in ingredients]
-        return clean_ingredients
+        return formatted_ingredients
 
 
 

@@ -14,9 +14,9 @@ PRODUCT_TYPE_CLASS = "css-iasgl9" #a (e.g. Eye Masks)
 
 # categories to search for products
 # add to this list as needed
-SUBCATEGORIES = ["skincare", "makeup-cosmetics"] # why doesn't this work?
+SUBCATEGORIES = ["skincare", "makeup-cosmetics"]
 
-EXCLUDE_SUBCATEGORIES = [ # why doesn't this work?
+EXCLUDE_SUBCATEGORIES = [
     "/shop/skin-care-sets-travel-value",
     "/shop/mini-skincare",
     "/shop/wellness-skincare",
