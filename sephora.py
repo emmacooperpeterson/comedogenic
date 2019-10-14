@@ -1,12 +1,17 @@
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium import webdriver
 from sephora_setup import *
 import pandas as pd
 import requests
+import time
 import bs4
 import re
+import os
 
 # TODO:
     # update format_ingredients to better handle all ingredient lists
     # update functions to crawl every page of subcategories (not just search on first page)
+        # tried adding "?pageSize=300" but no luck
 
 def get_sephora_products():
     """
@@ -23,7 +28,7 @@ def get_sephora_products():
     sephora = Sephora()
 
     # get links to all the subcategory pages
-    for subcategory in ["makeup-cosmetics", "skincare"]:
+    for subcategory in SUBCATEGORIES[0:1]: # SUBSETTING FOR TESTING
         print(f"getting subcategories for {subcategory}")
         sephora.get_subcategory_links(subcategory)
 
@@ -31,15 +36,16 @@ def get_sephora_products():
     print(f"found {n_subcategories} subcategories\n")
 
     # for each subcategory page, get links to all product pages
-    for i, subcategory in enumerate(sephora.subcategory_links):
+    for i, subcategory in enumerate(sephora.subcategory_links[0:1]): # SUBSETTING FOR TESTING
         print(f"getting product links for subcategory {i+1}/{n_subcategories}")
+        print(subcategory)
         sephora.get_product_links(subcategory)
 
     n_products = len(sephora.product_links)
     print(f"found {n_products} products\n")
 
     # for each product page, get all product information
-    for i, product in enumerate(sephora.product_links):
+    for i, product in enumerate(sephora.product_links[0:5]): # SUBSETTING FOR TESTING
         print(f"getting product info for product {i+1}/{n_products}")
         sephora.get_product_info(product)
 
@@ -108,20 +114,8 @@ class Sephora:
             class_tag = PRODUCT_CATEGORY_CLASS
         )
 
-        # list of subcategories to skip
-        exclude = [
-            "/shop/skin-care-sets-travel-value",
-            "/shop/mini-skincare",
-            "/shop/wellness-skincare",
-            "/shop/skin-care-tools",
-            "/shop/makeup-kits-makeup-sets",
-            "/shop/mini-makeup",
-            "/shop/makeup-applicators",
-            "/shop/makeup-accessories",
-            "/shop/nails-makeup"
-        ]
-
-        links = [c["href"] for c in categories if c not in exclude]
+        # EXCLUDE_SUBCATEGORIES listed in sephora_setup.py
+        links = [c["href"] for c in categories if c not in EXCLUDE_SUBCATEGORIES]
         self.subcategory_links += links
 
 
@@ -129,7 +123,15 @@ class Sephora:
         """
         Description
         -----------
+        TODO: click "next page" and continue
+        (this currently grabs first 200 products by scrolling,
+         but there are still more pages) --> next page button is css-a8wls9
+
         Get links to every product on a given subcategory page
+
+        Subcategory pages load as you scroll – this function uses
+        selenium to handle this. Scrolling code was adapted from:
+        https://michaeljsanders.com/2017/05/12/scrapin-and-scrollin.html
 
         Parameters
         ----------
@@ -141,13 +143,36 @@ class Sephora:
         Updates self.product_links with links for the specified subcategory
         """
 
-        products = search_url(
-            url = BASE_URL + subcategory_link,
-            class_type = "a",
-            class_tag = PRODUCT_LINK_CLASS
-        )
+        # setup for scrolling
+        browser = webdriver.Chrome(ChromeDriverManager().install())
+        browser.get(BASE_URL + subcategory_link + "?pageSize=300")
+
+        # scroll to the bottom, wait 2 seconds, continue until done
+        get_length_of_page = """
+            window.scrollTo(0, document.body.scrollHeight);
+            var lenOfPage = document.body.scrollHeight;
+            return lenOfPage;"""
+
+        length_of_page = browser.execute_script(get_length_of_page)
+
+        finished = False
+        while not finished:
+            last_count = length_of_page
+            time.sleep(3)
+            length_of_page = browser.execute_script(get_length_of_page)
+            if last_count == length_of_page:
+                finished = True
+
+        # now we can grab the full source code
+        source_code = browser.page_source
+        browser.close()
+
+        # use BeautifulSoup to search for the product links
+        soup = bs4.BeautifulSoup(source_code, "html.parser")
+        products = soup.find_all("a", class_ = PRODUCT_LINK_CLASS)
 
         links = [c["href"] for c in products]
+        print(f"{len(links)} products found")
         self.product_links += links
 
 
