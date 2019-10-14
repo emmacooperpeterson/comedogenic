@@ -30,7 +30,7 @@ def get_sephora_products():
     print(f"found {n_subcategories} subcategories\n")
 
     # for each subcategory page, get links to all product pages
-    for i, subcategory in enumerate(sephora.subcategory_links[15:16]): # subsetting to test
+    for i, subcategory in enumerate(sephora.subcategory_links):
         print(f"getting product links for subcategory {i+1}/{n_subcategories}")
         sephora.get_product_links(subcategory)
 
@@ -238,20 +238,33 @@ class Sephora:
             List of formatted ingredient strings
         """
 
+        # handle case when no ingredients were found on the page
+        if not raw_ingredients:
+            return[None]
+
         ingredients = []
 
         # remove parentheticals
         # e.g. Titanium Dioxide (CI 77891) -> Titanium Dioxide
-        regex = r"\({1}.{1,20}\){1}\s"
-        raw_ingredients = re.sub(regex, "", raw_ingredients)
+        try:
+            regex = r"\({1}.{1,20}\){1}\s"
+            raw_ingredients = re.sub(regex, "", raw_ingredients)
+        except:
+            pass
 
         # remove hyphens
-        regex = r"\-"
-        raw_ingredients = re.sub(regex, " ", raw_ingredients)
+        try:
+            regex = r"\-"
+            raw_ingredients = re.sub(regex, " ", raw_ingredients)
+        except:
+            pass
 
         # remove weird line breaks / characters
-        for pattern in [u"\xa0", u"\u2028", u"\r", u"\t", u"\n"]:
-            raw_ingredients = raw_ingredients.replace(pattern, u"")
+        try:
+            for pattern in [u"\xa0", u"\u2028", u"\r", u"\t", u"\n"]:
+                raw_ingredients = raw_ingredients.replace(pattern, u"")
+        except:
+            pass
 
         # because of the way the ingredient lists are set up on Sephora.com,
         # we need special regex to identify where the first ingredient begins.
@@ -259,16 +272,21 @@ class Sephora:
         first_ingredient_regex = r"\.([A-Z]+[\w\s]*)\,|[\.\s?]\s([A-Z]+[\w\s]*)\,"
         remaining_ingredients_regex = r"[\,]\s([A-Z]+[\w\s]*)"
 
-        # TODO: make this a try/except
         first_ingredient = re.search(first_ingredient_regex, raw_ingredients)
 
         # if the above regex didn't work, try another way
         if not first_ingredient:
             first_ingredient = re.search(r"([A-Z][a-z]*)\,", raw_ingredients)
 
-        ingredients.append(first_ingredient.group().strip("., \r"))
+        try:
+            ingredients.append(first_ingredient.group().strip("., \r"))
+        except:
+            pass
 
-        ingredients += re.findall(remaining_ingredients_regex, raw_ingredients)
+        try:
+            ingredients += re.findall(remaining_ingredients_regex, raw_ingredients)
+        except:
+            pass
 
         clean_ingredients = [ingr.strip().lower() for ingr in ingredients]
         return clean_ingredients
