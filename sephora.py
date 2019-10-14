@@ -1,36 +1,64 @@
-from bs4 import BeautifulSoup as bs
 from sephora_setup import *
 import pandas as pd
 import requests
+import bs4
 import re
 
+# TODO:
+    # update functions to crawl every page of subcategories (not just search on first page)
 
-
-def search_url(url, class_type: str, class_tag: str):
+def get_sephora_products():
     """
     Description
     -----------
-    Helper function to search a webpage for a given class type and tag
-
-    Parameters
-    ----------
-    class_type: str
-        e.g., "a", "div", "span", etc.
-    class_tag:str
-        the specific tag to search for, e.g. "css-or7ouu"
-        (these are defined in sephora_setup.py)
+    Main function to pull info from sephora.com, format it, and save it
 
     Returns
     -------
-    bs4.element.ResultSet object (iterable)
+    Saves ingredients.csv and products.csv
     """
-    page = requests.get(url)
-    soup = bs(page.content, "html.parser")
-    result = soup.find_all(class_type, class_ = class_tag)
-    return result
+
+    # create instance of Sephora class
+    sephora = Sephora()
+
+    # get links to all the subcategory pages
+    for subcategory in ["makeup-cosmetics", "skincare"]:
+        print(f"getting subcategories for {subcategory}")
+        sephora.get_subcategory_links(subcategory)
+
+    n_subcategories = len(sephora.subcategory_links)
+    print(f"found {n_subcategories} subcategories\n")
+
+    # for each subcategory page, get links to all product pages
+    for i, subcategory in enumerate(sephora.subcategory_links[15:16]): # subsetting to test
+        print(f"getting product links for subcategory {i+1}/{n_subcategories}")
+        sephora.get_product_links(subcategory)
+
+    n_products = len(sephora.product_links)
+    print(f"found {n_products} products\n")
+
+    # for each product page, get all product information
+    for i, product in enumerate(sephora.product_links):
+        print(f"getting product info for product {i+1}/{n_products}")
+        sephora.get_product_info(product)
+
+    # create and save dataframes with product info
+    ingredient_table = make_dataframe(
+        product_info = sephora.product_info,
+        table_type = "ingredients"
+    )
+
+    product_table = make_dataframe(
+        product_info = sephora.product_info,
+        table_type = "products"
+    )
 
 
 
+
+
+
+# ---------------------------- < SEPHORA CLASS > ----------------------------- #
 class Sephora:
     """
     A class used to represent Sephora.
@@ -58,7 +86,7 @@ class Sephora:
         Get links to all the subcategories associated with a given category,
         e.g. category = skincare, subcategories = cleansers, face masks, etc.
 
-        Currently accepts category_name = "skincare" or "makeup-cosmetics"
+        category_name currently accepts "skincare" or "makeup-cosmetics"
 
         Parameters
         ----------
@@ -71,7 +99,7 @@ class Sephora:
         """
 
         assert category_name in ["skincare", "makeup-cosmetics"], (
-            "category_name must be skincare or makeup-cosmetics.")
+            "category_name must be 'skincare' or 'makeup-cosmetics'")
 
         categories = search_url(
             url = BASE_URL + "shop/" + category_name,
@@ -96,7 +124,7 @@ class Sephora:
         self.subcategory_links += links
 
 
-    def get_product_links(self, subcategory_link):
+    def get_product_links(self, subcategory_link: str):
         """
         Description
         -----------
@@ -109,7 +137,7 @@ class Sephora:
 
         Returns
         -------
-        Updates self.product_links to include links for specified subcategory
+        Updates self.product_links with links for the specified subcategory
         """
 
         products = search_url(
@@ -123,7 +151,7 @@ class Sephora:
 
 
 
-    def get_product_info(self, product_link):
+    def get_product_info(self, product_link: str):
         """
         Description
         -----------
@@ -131,19 +159,18 @@ class Sephora:
 
         Parameters
         ----------
-        product_link:str
+        product_link: str
             link suffix for a product page, e.g.
             "/product/fablantis-P447792?icid2=products grid:p447792"
 
         Returns
         -------
-        Updates self.product_info to include a dictionary
-        for the specified product
+        Updates self.product_info with a dictionary for the specified product
         """
 
         url = BASE_URL + product_link
         page = requests.get(url)
-        soup = bs(page.content, 'html.parser')
+        soup = bs4.BeautifulSoup(page.content, 'html.parser')
 
         name = soup.find("span", class_ = NAME_CLASS).get_text()
 
@@ -158,13 +185,19 @@ class Sephora:
         price = soup.find("div", class_ = PRICE_CLASS).get_text()
         product_details = soup.find_all("div", class_ = PRODUCT_CLASS)
 
-        if len(product_details) > 0:
+        description = None
+        usage = None
+        raw_ingredients = None
+
+        product_details_length = len(product_details)
+
+        if product_details_length > 0:
             description = product_details[0].get_text()
 
-        if len(product_details) > 1:
+        if product_details_length > 1:
             usage = product_details[1].get_text()
 
-        if len(product_details) > 2:
+        if product_details_length > 2:
             raw_ingredients = product_details[2].get_text()
 
         # convert the raw ingredient string to a list of formatted ingredients
@@ -182,7 +215,7 @@ class Sephora:
         })
 
 
-    def format_ingredients(self, raw_ingredients) -> list:
+    def format_ingredients(self, raw_ingredients: str) -> list:
         """
         Description
         -----------
@@ -194,14 +227,14 @@ class Sephora:
 
         Parameters
         ----------
-        raw_ingredients:str
+        raw_ingredients: str
             string listing all ingredients, e.g.
             "Water, Simmondsia Chinensis (Jojoba) Seed Oil,
                 Butyrospermum Parkii (Shea) Butter, ..."
 
         Returns
         -------
-        formatted_ingredients:list of str
+        formatted_ingredients: list of str
             List of formatted ingredient strings
         """
 
@@ -243,72 +276,89 @@ class Sephora:
 
 
 
+# ------------------------------- < HELPERS > -------------------------------- #
+def search_url(url, class_type: str, class_tag: str) -> bs4.element.ResultSet:
+    """
+    Description
+    -----------
+    Helper function to search a webpage for a given class type and tag
+
+    Parameters
+    ----------
+    class_type: str
+        e.g., "a", "div", "span", etc.
+    class_tag: str
+        the specific tag to search for, e.g. "css-or7ouu"
+        (these are defined in sephora_setup.py)
+
+    Returns
+    -------
+    bs4.element.ResultSet object (iterable)
+    """
+    page = requests.get(url)
+    soup = bs4.BeautifulSoup(page.content, "html.parser")
+    result = soup.find_all(class_type, class_ = class_tag)
+    return result
 
 
 
-def make_ingredient_table(product_info: list) -> pd.DataFrame:
-    product_names = []
-    product_ingredients = []
+def make_dataframe(product_info: list, table_type: str) -> pd.DataFrame:
+    """
+    Description
+    -----------
+    Convert product_info (list of dictionaries) to a dataframe
+    containing product name, ingredients, and ingredient rank
+    (i.e. rank = 1 for first ingredient) –> long format
+
+    Parameters
+    ----------
+    product_info: list of dict
+        one dictionary for each product in list
+    table_type: str
+        one of ["ingredients", "products"]
+
+    Returns
+    -------
+    df: DataFrame
+
+    This function also saves the resulting dataframe as a .csv
+    """
+
+    assert table_type in ["ingredients", "products"], (
+        "table_type must be 'ingredients' or 'products'")
+
+    dataframes = []
 
     for product in product_info:
-        ingredients = product["ingredients"]
-        product_ingredients.append(ingredients)
-        product_names.append([product["name"]] * len(ingredients))
+        if table_type == "ingredients":
+            product_dict = {
+                "name": product["name"],
+                "ingredient": product["ingredients"],
+                "rank": list(range(1, len(product["ingredients"]) + 1))
+            }
 
-    product_names = [x for lst in product_names for x in lst]
-    product_ingredients = [x.lower() for lst in product_ingredients for x in lst]
+        if table_type == "products":
+            product_dict = {
+                "name": [product["name"]],
+                "brand": [product["brand"]],
+                "price": [product["price"]],
+                "link": [product["link"]]
+            }
 
-    df = pd.DataFrame(list(zip(product_names, product_ingredients)),
-                      columns =['name', 'ingredient'])
+        dataframes.append(pd.DataFrame(product_dict))
 
-    # add ingredient rank
-    df["rank"] = df.groupby(["name"]).cumcount()+1
+    df = pd.concat(dataframes)
 
-    return(df)
+    # save dataframe to csv
+    df.to_csv(f"{table_type}.csv", index = False)
+
+    return df
 
 
 
-def make_product_table(product_info: list) -> pd.DataFrame:
-    products = product_info
-
-    for p in products: #FIXME
-        p.pop("ingredients")
-        p.pop("raw ingredients")
-
-    product_df = pd.DataFrame(products)
-
-    return product_df
 
 
 
 
 if __name__ == '__main__':
-    
-    sephora = Sephora()
-
-    #for subcategory in SUBCATEGORIES: idk why this doesn't work
-    for subcategory in ["makeup-cosmetics", "skincare"]:
-        sephora.get_subcategory_links(subcategory)
-
-    for i, subcategory in enumerate(sephora.subcategory_links[15:16]): # subsetting to test
-        print(f"getting product links for subcategory {i+1} of {len(sephora.subcategory_links[15:16])}")
-        sephora.get_product_links(subcategory)
-
-    print("")
-
-    for i, product in enumerate(sephora.product_links):
-        print(f"getting product info for product {i+1} of {len(sephora.product_links)}")
-        sephora.get_product_info(product)
-
-    ingredient_table = make_ingredient_table(sephora.product_info)
-    #ingredient_table.to_csv("ingredient_table.csv", index = False)
-    #product_table = make_product_table(sephora.product_info)
-    #product_table.to_csv("product_table.csv", index = False)
-
-
-
-# TODO:
-    # improve the table functions
-    # document table functions
-    # create a main() function
-    # update functions to crawl every page of subcategories (not just search on first page)
+    get_sephora_products()
