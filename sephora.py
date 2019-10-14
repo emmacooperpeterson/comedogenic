@@ -5,6 +5,7 @@ import bs4
 import re
 
 # TODO:
+    # update format_ingredients to better handle all ingredient lists
     # update functions to crawl every page of subcategories (not just search on first page)
 
 def get_sephora_products():
@@ -219,8 +220,6 @@ class Sephora:
         """
         Description
         -----------
-        TODO: Update this function to better handle all ingredient lists
-
         Create a list of formatted ingredients from the raw_ingredients string
         e.g. raw_ingredients = "Aqua (Water), Glycerin, Niacinamide"
              formatted_ingredients = ["aqua", "glycerin", "nicacinamide"]
