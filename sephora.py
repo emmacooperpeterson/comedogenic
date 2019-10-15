@@ -3,15 +3,12 @@ from selenium import webdriver
 from sephora_setup import *
 import pandas as pd
 import requests
+import logging
 import time
 import bs4
 import re
 import os
 
-# TODO:
-    # update format_ingredients to better handle all ingredient lists
-    # update functions to crawl every page of subcategories (not just search on first page)
-        # tried adding "?pageSize=300" but no luck
 
 def get_sephora_products():
     """
@@ -24,31 +21,40 @@ def get_sephora_products():
     Saves ingredients.csv and products.csv
     """
 
+    # set up logging
+    logging.basicConfig(filename = "runlog.log",
+                        filemode = "w",
+                        format = "%(asctime)s -> %(message)s",
+                        datefmt = "%d-%b-%y %H:%M:%S'",
+                        level = logging.INFO)
+
     # create instance of Sephora class
     sephora = Sephora()
 
     # get links to all the subcategory pages
-    for subcategory in SUBCATEGORIES[0:1]: # SUBSETTING FOR TESTING
-        print(f"getting subcategories for {subcategory}")
-        sephora.get_subcategory_links(subcategory)
+    #for subcategory in SUBCATEGORIES:
+    logging.info(f"getting subcategories for skincare")
+    sephora.get_subcategory_links("skincare")
 
     n_subcategories = len(sephora.subcategory_links)
-    print(f"found {n_subcategories} subcategories\n\n")
+    logging.info(f"found {n_subcategories} subcategories\n\n")
 
     # for each subcategory page, get links to all product pages
-    for i, subcategory in enumerate(sephora.subcategory_links[0:5]): # SUBSETTING FOR TESTING
-        print(f"getting product links for subcategory {i+1}/{n_subcategories} -> {subcategory}")
+    for i, subcategory in enumerate(sephora.subcategory_links[0:5]):
+        logging.info(f"getting product links for subcategory {i+1}/{n_subcategories} -> {subcategory}")
         sephora.get_product_links(subcategory, testing = True)
 
     n_products = len(sephora.product_links)
-    print(f"\nfound {n_products} products\n\n")
+    logging.info(f"found {n_products} products\n\n")
+
+    print("getting product info...")
 
     # for each product page, get all product information
-    for i, product in enumerate(sephora.product_links[0:5]): # SUBSETTING FOR TESTING
-        print(f"\ngetting product info for product {i+1}/{n_products}")
+    for i, product in enumerate(sephora.product_links[0:15]):
+        logging.info(f"getting product info for product {i+1}/{n_products}")
         sephora.get_product_info(product)
 
-    # create and save dataframes with product info
+    # create and save dataframes
     ingredient_table = make_dataframe(
         product_info = sephora.product_info,
         table_type = "ingredients"
@@ -158,6 +164,12 @@ class Sephora:
             browser = webdriver.Chrome(ChromeDriverManager().install())
             browser.get(BASE_URL + subcategory_link + "?pageSize=300")
 
+            # close the "Sign up for Sephora" box if it's there
+            try:
+                browser.find_element_by_class_name("css-wuwqem").click();
+            except:
+                pass
+
             # scroll to the bottom, wait 2 seconds, continue until done
             get_length_of_page = """
                 window.scrollTo(0, document.body.scrollHeight);
@@ -169,7 +181,7 @@ class Sephora:
             finished = False
             while not finished:
                 last_count = length_of_page
-                time.sleep(3)
+                time.sleep(5)
                 length_of_page = browser.execute_script(get_length_of_page)
                 if last_count == length_of_page:
                     finished = True
@@ -183,7 +195,7 @@ class Sephora:
             products = soup.find_all("a", class_ = PRODUCT_LINK_CLASS)
 
         links = [c["href"] for c in products]
-        print(f"{len(links)} products found\n")
+        logging.info(f"{len(links)} products found\n")
         self.product_links += links
 
 
@@ -214,7 +226,7 @@ class Sephora:
         # skip kits/sets of products
         pattern = re.compile(r"\sset\s|\skit\s", re.IGNORECASE)
         if pattern.search(name):
-            print(f"skipping set: {name}")
+            logging.info(f"skipping set: {name}")
             return None
 
         # FIXME (doesn't work for all products)
@@ -232,16 +244,27 @@ class Sephora:
         if product_details_length > 0:
             description = product_details[0].get_text()
 
+            # skip kits/sets of products
+            if pattern.search(description):
+                logging.info(f"skipping set: {name}")
+                return None
+
         if product_details_length > 1:
             usage = product_details[1].get_text()
 
         if product_details_length > 2:
-            raw_ingredients = product_details[2].get_text()
+            raw_ingredients = product_details[2].br
 
-        # skip kits/sets of products
-        if pattern.search(description):
-            print(f"skipping set: {name}")
-            return None
+            # the top of the ingredients list contains unncessary info
+            # use BeautifulSoup to locate the actual ingredient list
+            finished = False
+            while not finished:
+                raw_ingredients = raw_ingredients.next_sibling
+                if not isinstance(raw_ingredients, bs4.element.NavigableString):
+                    continue
+                if raw_ingredients.count(",") < 5: # assume >5 ingredients
+                    continue
+                finished = True
 
         # convert the raw ingredient string to a list of formatted ingredients
         # formatted = lowercase, no punctuation, etc.
@@ -294,38 +317,21 @@ class Sephora:
         match = "This product is vegan and gluten-free."
         raw_ingredients = raw_ingredients.replace(match, "")
 
+        match = "These statements have not been evaluated"
+        raw_ingredients = raw_ingredients.split(match, 1)[0]
+
         # remove parentheticals
         # e.g. Titanium Dioxide (CI 77891) -> Titanium Dioxide
         regex = r"\({1}.{1,20}\){1}\s"
         raw_ingredients = re.sub(regex, "", raw_ingredients)
 
-        # locate ingredient list within the full ingredient string
-        # the first regex looks for a period followed by a new line
-        # to mark the possible beginning of the ingredient list.
-        # the ingredient list itself then includes letters, forward slashes,
-        # commas, spaces, numbers, and/or hyphens.
-        # the end of the list is denoted by another period and new line.
-        # if that doesn't work, look for Water|Aqua|Eau – usually 1st ingredient
-        try:
-            raw_ingredients = re.search(
-                r"\.\n([a-zA-Z\/?,\s()\d–]+).\n",
-                raw_ingredients).group()
-        except:
-            try:
-                raw_ingredients = re.search(
-                    r"\s{2}([Water|Aqua|Eau].*)\.",
-                    raw_ingredients).group()
-            except:
-                print(f"failed to find ingredients for {product_name}")
-                pass # add more regex patterns here as needed
-
         # remove new line characters and periods
-        raw_ingredients = re.sub(r"|\n|\.", "", raw_ingredients)
+        raw_ingredients = re.sub(r"|\n|\.|\*", "", raw_ingredients)
 
         # split into a list of strings
         ingredients = raw_ingredients.split(", ")
         formatted_ingredients = [ingr.strip().lower() for ingr in ingredients]
-        print(f"found {len(formatted_ingredients)} ingredients: {product_name}")
+        logging.info(f"found {len(formatted_ingredients)} ingredients: {product_name}")
 
         return formatted_ingredients
 
