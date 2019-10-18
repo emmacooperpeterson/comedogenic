@@ -9,6 +9,8 @@ import bs4
 import re
 import os
 
+# TODO: remove duplicates (if we've already got the product, skip it)
+
 
 def get_sephora_products():
     """
@@ -40,9 +42,9 @@ def get_sephora_products():
     logging.info(f"found {n_subcategories} subcategories\n\n")
 
     # for each subcategory page, get links to all product pages
-    for i, subcategory in enumerate(sephora.subcategory_links[0:5]):
+    for i, subcategory in enumerate(sephora.subcategory_links[0:5]): # SUBSET FOR TESTING
         logging.info(f"getting product links for subcategory {i+1}/{n_subcategories} -> {subcategory}")
-        sephora.get_product_links(subcategory, testing = True)
+        sephora.get_product_links(subcategory, testing = True) # TESTING PARAM
 
     n_products = len(sephora.product_links)
     logging.info(f"found {n_products} products\n\n")
@@ -50,7 +52,7 @@ def get_sephora_products():
     print("getting product info...")
 
     # for each product page, get all product information
-    for i, product in enumerate(sephora.product_links[0:15]):
+    for i, product in enumerate(list(sephora.product_links)[0:15]): # LIST AND SUBSET FOR TESING
         logging.info(f"getting product info for product {i+1}/{n_products}")
         sephora.get_product_info(product)
 
@@ -87,7 +89,7 @@ class Sephora:
 
     def __init__(self):
         self.subcategory_links = []
-        self.product_links = []
+        self.product_links = set()
         self.product_info = []
 
 
@@ -194,9 +196,9 @@ class Sephora:
             soup = bs4.BeautifulSoup(source_code, "html.parser")
             products = soup.find_all("a", class_ = PRODUCT_LINK_CLASS)
 
-        links = [c["href"] for c in products]
+        links = set([c["href"] for c in products])
         logging.info(f"{len(links)} products found\n")
-        self.product_links += links
+        self.product_links.update(links) # append to set
 
 
 
@@ -253,18 +255,25 @@ class Sephora:
             usage = product_details[1].get_text()
 
         if product_details_length > 2:
-            raw_ingredients = product_details[2].br
+            #raw_ingredients = product_details[2].br
+            raw_ingredients = product_details[2]
 
-            # the top of the ingredients list contains unncessary info
-            # use BeautifulSoup to locate the actual ingredient list
-            finished = False
-            while not finished:
-                raw_ingredients = raw_ingredients.next_sibling
-                if not isinstance(raw_ingredients, bs4.element.NavigableString):
-                    continue
-                if raw_ingredients.count(",") < 5: # assume >5 ingredients
-                    continue
-                finished = True
+            if raw_ingredients.br: # most of the time this is true (the ingredients live below some other text)
+                raw_ingredients = raw_ingredients.br
+
+                # the top of the ingredients list contains unncessary info
+                # use BeautifulSoup to locate the actual ingredient list
+                finished = False
+                while not finished:
+                    raw_ingredients = raw_ingredients.next_sibling
+                    if not isinstance(raw_ingredients, bs4.element.NavigableString):
+                        continue
+                    if raw_ingredients.count(",") < 5: # assume >5 ingredients
+                        continue
+                    finished = True
+
+            else:
+                raw_ingredients = raw_ingredients.get_text()
 
         # convert the raw ingredient string to a list of formatted ingredients
         # formatted = lowercase, no punctuation, etc.
@@ -320,17 +329,21 @@ class Sephora:
         match = "These statements have not been evaluated"
         raw_ingredients = raw_ingredients.split(match, 1)[0]
 
+        match = "Please be aware that ingredient lists may change"
+        raw_ingredients = raw_ingredients.split(match, 1)[0]
+
         # remove parentheticals
         # e.g. Titanium Dioxide (CI 77891) -> Titanium Dioxide
         regex = r"\({1}.{1,20}\){1}\s"
         raw_ingredients = re.sub(regex, "", raw_ingredients)
 
         # remove new line characters and periods
-        raw_ingredients = re.sub(r"|\n|\.|\*", "", raw_ingredients)
+        raw_ingredients = re.sub(r"|\n|\.|\*|\r", " ", raw_ingredients)
 
         # split into a list of strings
         ingredients = raw_ingredients.split(", ")
-        formatted_ingredients = [ingr.strip().lower() for ingr in ingredients]
+        formatted_ingredients = set([ingr.strip().lower() for ingr in ingredients])
+        # use set ^ in case there are any duplicates
         logging.info(f"found {len(formatted_ingredients)} ingredients: {product_name}")
 
         return formatted_ingredients
@@ -395,7 +408,7 @@ def make_dataframe(product_info: list, table_type: str) -> pd.DataFrame:
         if table_type == "ingredients":
             product_dict = {
                 "name": product["name"],
-                "ingredient": product["ingredients"],
+                "ingredient": list(product["ingredients"]),
                 "rank": list(range(1, len(product["ingredients"]) + 1))
             }
 
@@ -423,4 +436,48 @@ def make_dataframe(product_info: list, table_type: str) -> pd.DataFrame:
 
 
 if __name__ == '__main__':
-    get_sephora_products()
+    #get_sephora_products()
+
+    # set up logging
+    logging.basicConfig(filename = "runlog.log",
+                        filemode = "w",
+                        format = "%(asctime)s -> %(message)s",
+                        datefmt = "%d-%b-%y %H:%M:%S'",
+                        level = logging.INFO)
+
+    # create instance of Sephora class
+    sephora = Sephora()
+
+    # get links to all the subcategory pages
+    #for subcategory in SUBCATEGORIES:
+    logging.info(f"getting subcategories for skincare")
+    sephora.get_subcategory_links("skincare")
+
+    n_subcategories = len(sephora.subcategory_links)
+    logging.info(f"found {n_subcategories} subcategories\n\n")
+
+    # for each subcategory page, get links to all product pages
+    for i, subcategory in enumerate(sephora.subcategory_links[0:5]): # SUBSET FOR TESTING
+        logging.info(f"getting product links for subcategory {i+1}/{n_subcategories} -> {subcategory}")
+        sephora.get_product_links(subcategory, testing = True) # TESTING PARAM
+
+    n_products = len(sephora.product_links)
+    logging.info(f"found {n_products} products\n\n")
+
+    print("getting product info...")
+
+    # for each product page, get all product information
+    for i, product in enumerate(list(sephora.product_links)[0:15]): # LIST AND SUBSET FOR TESING
+        logging.info(f"getting product info for product {i+1}/{n_products}")
+        sephora.get_product_info(product)
+
+    # create and save dataframes
+    ingredient_table = make_dataframe(
+        product_info = sephora.product_info,
+        table_type = "ingredients"
+    )
+
+    product_table = make_dataframe(
+        product_info = sephora.product_info,
+        table_type = "products"
+    )
