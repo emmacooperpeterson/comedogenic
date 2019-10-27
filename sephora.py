@@ -9,6 +9,17 @@ import bs4
 import re
 import os
 
+# to do: come up with a better method than 10 commas :-)
+# this misses short INCI lists entirely
+# idea: keep going to the next sibling until we reach the bottom
+# if the bottom has the "clean @ sephora" stuff or whatever
+# go one above that
+# the INCI list is almost always the last thing that contains a fair amount of commas
+
+# to do: figure out why the scrolling only seems to work for the first subcategory
+# maybe i need to close the browser thing entirely each time instead of using the cached one?
+
+# to do: add ratings to product info
 
 def get_sephora_products():
     """
@@ -353,12 +364,6 @@ class Sephora:
 
         # sometimes the ingredients are the very first thing in the section
         # assume this is the case if the first thing contains >10 commas
-        # to do: come up with a better method than 10 commas :-)
-        # this misses short INCI lists entirely
-        # idea: keep going to the next sibling until we reach the bottom
-        # if the bottom has the "clean @ sephora" stuff or whatever
-        # go one above that
-        # the INCI list is almost always the last thing that contains a fair amount of commas
         first_item = next(raw_ingredients.children, None).string
 
         if first_item:
