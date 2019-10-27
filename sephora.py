@@ -9,8 +9,6 @@ import bs4
 import re
 import os
 
-# TODO: remove duplicates (if we've already got the product, skip it)
-
 
 def get_sephora_products():
     """
@@ -25,7 +23,7 @@ def get_sephora_products():
 
     # set up logging
     logging.basicConfig(filename = "runlog.log",
-                        filemode = "w",
+                        filemode = "rw",
                         format = "%(asctime)s -> %(message)s",
                         datefmt = "%d-%b-%y %H:%M:%S'",
                         level = logging.INFO)
@@ -37,22 +35,17 @@ def get_sephora_products():
     #for subcategory in SUBCATEGORIES:
     logging.info(f"getting subcategories for skincare")
     sephora.get_subcategory_links("skincare")
-
-    n_subcategories = len(sephora.subcategory_links)
-    logging.info(f"found {n_subcategories} subcategories\n\n")
+    logging.info(f"found {len(sephora.subcategory_links)} subcategories\n\n")
 
     # for each subcategory page, get links to all product pages
-    for i, subcategory in enumerate(sephora.subcategory_links[0:5]): # SUBSET FOR TESTING
+    for i, subcategory in enumerate(sephora.subcategory_links):
         logging.info(f"getting product links for subcategory {i+1}/{n_subcategories} -> {subcategory}")
-        sephora.get_product_links(subcategory, testing = True) # TESTING PARAM
+        sephora.get_product_links(subcategory, testing = False)
 
-    n_products = len(sephora.product_links)
-    logging.info(f"found {n_products} products\n\n")
-
-    print("getting product info...")
+    logging.info(f"found {len(sephora.product_links)} products\n\n")
 
     # for each product page, get all product information
-    for i, product in enumerate(list(sephora.product_links)[0:15]): # LIST AND SUBSET FOR TESING
+    for i, product in enumerate(sephora.product_links):
         logging.info(f"getting product info for product {i+1}/{n_products}")
         sephora.get_product_info(product)
 
@@ -155,6 +148,7 @@ class Sephora:
         """
 
         if testing:
+            logging.info("TESTING")
             products = search_url(
                 url = BASE_URL + subcategory_link,
                 class_type = "a",
@@ -219,78 +213,162 @@ class Sephora:
         Updates self.product_info with a dictionary for the specified product
         """
 
+        # grab the page
         url = BASE_URL + product_link
         page = requests.get(url)
         soup = bs4.BeautifulSoup(page.content, 'html.parser')
 
-        name = soup.find("span", class_ = NAME_CLASS).get_text()
+        # find product info
+        name = self.safely_find(
+            soup = soup,
+            tag = "span",
+            class_tag = NAME_CLASS
+        )
 
         # skip kits/sets of products
-        pattern = re.compile(r"\sset\s|\skit\s", re.IGNORECASE)
-        if pattern.search(name):
+        kit_pattern = re.compile(r"\sset\s|\skit\s", re.IGNORECASE)
+
+        if kit_pattern.search(name):
             logging.info(f"skipping set: {name}")
             return None
 
-        # FIXME (doesn't work for all products)
-        #type = soup.find("a", class_ = PRODUCT_TYPE_CLASS).get_text()
-        brand = soup.find("span", class_ = BRAND_CLASS).get_text()
-        price = soup.find("div", class_ = PRICE_CLASS).get_text()
-        product_details = soup.find_all("div", class_ = PRODUCT_CLASS)
+        brand = self.safely_find(
+            soup = soup,
+            tag = "span",
+            class_tag = BRAND_CLASS
+        )
 
+        price = self.safely_find(
+            soup = soup,
+            tag = "div",
+            class_tag = PRICE_CLASS
+        )
+
+        product_type = self.safely_find(
+            soup = soup,
+            tag = "a",
+            class_tag = PRODUCT_TYPE_CLASS
+        )
+
+        product_details = self.safely_find(
+            soup = soup,
+            tag = "div",
+            class_tag = PRODUCT_CLASS,
+            find_all = True
+        )
+
+        # separate product_details into description, usage, and ingredients
         description = None
         usage = None
-        raw_ingredients = None
 
-        product_details_length = len(product_details)
-
-        if product_details_length > 0:
+        if len(product_details) > 0:
             description = product_details[0].get_text()
 
             # skip kits/sets of products
-            if pattern.search(description):
+            if kit_pattern.search(description):
                 logging.info(f"skipping set: {name}")
                 return None
 
-        if product_details_length > 1:
+        if len(product_details) > 1:
             usage = product_details[1].get_text()
 
-        if product_details_length > 2:
-            #raw_ingredients = product_details[2].br
+        raw_ingredients = None
+        if len(product_details) > 2:
             raw_ingredients = product_details[2]
+            final_ingredients = self.find_ingredients(raw_ingredients)
 
-            if raw_ingredients.br: # most of the time this is true (the ingredients live below some other text)
-                raw_ingredients = raw_ingredients.br
-
-                # the top of the ingredients list contains unncessary info
-                # use BeautifulSoup to locate the actual ingredient list
-                finished = False
-                while not finished:
-                    raw_ingredients = raw_ingredients.next_sibling
-                    if not isinstance(raw_ingredients, bs4.element.NavigableString):
-                        continue
-                    if raw_ingredients.count(",") < 5: # assume >5 ingredients
-                        continue
-                    finished = True
-
-            else:
-                raw_ingredients = raw_ingredients.get_text()
-
-        # convert the raw ingredient string to a list of formatted ingredients
-        # formatted = lowercase, no punctuation, etc.
+        # convert the ingredient string to a list of formatted ingredients
         formatted_ingredients = self.format_ingredients(
-            raw_ingredients = raw_ingredients,
+            raw_ingredients = final_ingredients,
             product_name = name
         )
 
+        # save the final information
         self.product_info.append({
             "name": name,
             "link": url,
             "brand": brand,
             "price": price,
-            "raw ingredients": raw_ingredients,
+            "raw ingredients": final_ingredients,
             "ingredients": formatted_ingredients,
-            #"type": type
+            "product_type": product_type
         })
+
+
+    def safely_find(self, soup, tag: str, class_tag: str, find_all: bool = False):
+        """
+        Description
+        -----------
+        Helper function to locate a given class with the page,
+        and return None if it isn't found
+
+        Parameters
+        ----------
+        soup: bs4 object returned by bs4.BeautifulSoup()
+        tag: str
+            e.g. "span", "div", etc.
+        class_tag: str
+            the specific class you're searching for
+        find_all: bool
+            True if find_all() is desired; otherwise, find() is used
+
+        Returns
+        -------
+        result: list if find_all = True, string otherwise
+        """
+
+        try:
+            if find_all:
+                result = soup.find_all(tag, class_ = class_tag)
+            else:
+                result = soup.find(tag, class_ = class_tag).get_text()
+
+        except:
+            result = None
+        return result
+
+
+    def find_ingredients(self, raw_ingredients):
+        """
+        Description
+        -----------
+        Helper function to locate ingredient list within product details
+
+        Parameters
+        ----------
+        raw_ingredients: bs4 object
+
+        Returns
+        -------
+        ingredients: str
+        """
+
+        # sometimes the ingredients are the very first thing in the section
+        # assume this is the case if the first thing contains >5 commas
+        first_item = next(raw_ingredients.children, None).string
+        if first_item.count(",") > 5:
+            ingredients = first_item
+
+        elif raw_ingredients.br:
+            ingredients = raw_ingredients.br
+
+            # loop until we locate the ingredient list
+            finished = False
+            while not finished:
+                try:
+                    ingredients = ingredients.next_sibling
+
+                    if not isinstance(ingredients, bs4.element.NavigableString):
+                        continue
+
+                    if ingredients.count(",") < 5:
+                        continue
+                except:
+                    logging.info(f"---------> FAILED TO FIND INGREDIENTS FOR {name}")
+
+                finished = True
+
+        return ingredients
 
 
     def format_ingredients(self, raw_ingredients: str, product_name: str) -> list:
