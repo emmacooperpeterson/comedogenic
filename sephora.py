@@ -23,7 +23,7 @@ def get_sephora_products():
 
     # set up logging
     logging.basicConfig(filename = "runlog.log",
-                        filemode = "rw",
+                        filemode = "w",
                         format = "%(asctime)s -> %(message)s",
                         datefmt = "%d-%b-%y %H:%M:%S'",
                         level = logging.INFO)
@@ -35,14 +35,16 @@ def get_sephora_products():
     #for subcategory in SUBCATEGORIES:
     logging.info(f"getting subcategories for skincare")
     sephora.get_subcategory_links("skincare")
-    logging.info(f"found {len(sephora.subcategory_links)} subcategories\n\n")
+    n_subcategories = len(sephora.subcategory_links)
+    logging.info(f"found {n_subcategories} subcategories\n\n")
 
     # for each subcategory page, get links to all product pages
     for i, subcategory in enumerate(sephora.subcategory_links):
         logging.info(f"getting product links for subcategory {i+1}/{n_subcategories} -> {subcategory}")
-        sephora.get_product_links(subcategory, testing = False)
+        sephora.get_product_links(subcategory)
 
-    logging.info(f"found {len(sephora.product_links)} products\n\n")
+    n_products = len(sephora.product_links)
+    logging.info(f"found {n_products} products\n\n")
 
     # for each product page, get all product information
     for i, product in enumerate(sephora.product_links):
@@ -148,7 +150,6 @@ class Sephora:
         """
 
         if testing:
-            logging.info("TESTING")
             products = search_url(
                 url = BASE_URL + subcategory_link,
                 class_type = "a",
@@ -225,6 +226,8 @@ class Sephora:
             class_tag = NAME_CLASS
         )
 
+        logging.info(name)
+
         # skip kits/sets of products
         kit_pattern = re.compile(r"\sset\s|\skit\s", re.IGNORECASE)
 
@@ -272,7 +275,7 @@ class Sephora:
         if len(product_details) > 1:
             usage = product_details[1].get_text()
 
-        raw_ingredients = None
+        final_ingredients = None
         if len(product_details) > 2:
             raw_ingredients = product_details[2]
             final_ingredients = self.find_ingredients(raw_ingredients)
@@ -282,6 +285,9 @@ class Sephora:
             raw_ingredients = final_ingredients,
             product_name = name
         )
+
+        logging.info(formatted_ingredients)
+        logging.info("\n\n")
 
         # save the final information
         self.product_info.append({
@@ -343,30 +349,40 @@ class Sephora:
         ingredients: str
         """
 
+        ingredients = None
+
         # sometimes the ingredients are the very first thing in the section
-        # assume this is the case if the first thing contains >5 commas
+        # assume this is the case if the first thing contains >10 commas
+        # to do: come up with a better method than 10 commas :-)
+        # this misses short INCI lists entirely
+        # idea: keep going to the next sibling until we reach the bottom
+        # if the bottom has the "clean @ sephora" stuff or whatever
+        # go one above that
+        # the INCI list is almost always the last thing that contains a fair amount of commas
         first_item = next(raw_ingredients.children, None).string
-        if first_item.count(",") > 5:
-            ingredients = first_item
 
-        elif raw_ingredients.br:
-            ingredients = raw_ingredients.br
+        if first_item:
+            if first_item.count(",") >= 10:
+                ingredients = first_item
 
-            # loop until we locate the ingredient list
-            finished = False
-            while not finished:
-                try:
-                    ingredients = ingredients.next_sibling
+            elif raw_ingredients.br:
+                ingredients = raw_ingredients.br
 
-                    if not isinstance(ingredients, bs4.element.NavigableString):
-                        continue
+                # loop until we locate the ingredient list
+                finished = False
+                while not finished:
+                    try:
+                        ingredients = ingredients.next_sibling
 
-                    if ingredients.count(",") < 5:
-                        continue
-                except:
-                    logging.info(f"---------> FAILED TO FIND INGREDIENTS FOR {name}")
+                        if not isinstance(ingredients, bs4.element.NavigableString):
+                            continue
 
-                finished = True
+                        if ingredients.count(",") < 10:
+                            continue
+                    except:
+                        logging.info(f"---------------> FAILED TO FIND INGREDIENTS")
+
+                    finished = True
 
         return ingredients
 
@@ -416,11 +432,12 @@ class Sephora:
         raw_ingredients = re.sub(regex, "", raw_ingredients)
 
         # remove new line characters and periods
-        raw_ingredients = re.sub(r"|\n|\.|\*|\r", " ", raw_ingredients)
+        raw_ingredients = re.sub(r"\n|\.|\*|\r", " ", raw_ingredients)
 
         # split into a list of strings
         ingredients = raw_ingredients.split(", ")
         formatted_ingredients = set([ingr.strip().lower() for ingr in ingredients])
+
         # use set ^ in case there are any duplicates
         logging.info(f"found {len(formatted_ingredients)} ingredients: {product_name}")
 
@@ -514,48 +531,4 @@ def make_dataframe(product_info: list, table_type: str) -> pd.DataFrame:
 
 
 if __name__ == '__main__':
-    #get_sephora_products()
-
-    # set up logging
-    logging.basicConfig(filename = "runlog.log",
-                        filemode = "w",
-                        format = "%(asctime)s -> %(message)s",
-                        datefmt = "%d-%b-%y %H:%M:%S'",
-                        level = logging.INFO)
-
-    # create instance of Sephora class
-    sephora = Sephora()
-
-    # get links to all the subcategory pages
-    #for subcategory in SUBCATEGORIES:
-    logging.info(f"getting subcategories for skincare")
-    sephora.get_subcategory_links("skincare")
-
-    n_subcategories = len(sephora.subcategory_links)
-    logging.info(f"found {n_subcategories} subcategories\n\n")
-
-    # for each subcategory page, get links to all product pages
-    for i, subcategory in enumerate(sephora.subcategory_links[0:5]): # SUBSET FOR TESTING
-        logging.info(f"getting product links for subcategory {i+1}/{n_subcategories} -> {subcategory}")
-        sephora.get_product_links(subcategory, testing = True) # TESTING PARAM
-
-    n_products = len(sephora.product_links)
-    logging.info(f"found {n_products} products\n\n")
-
-    print("getting product info...")
-
-    # for each product page, get all product information
-    for i, product in enumerate(list(sephora.product_links)[0:15]): # LIST AND SUBSET FOR TESING
-        logging.info(f"getting product info for product {i+1}/{n_products}")
-        sephora.get_product_info(product)
-
-    # create and save dataframes
-    ingredient_table = make_dataframe(
-        product_info = sephora.product_info,
-        table_type = "ingredients"
-    )
-
-    product_table = make_dataframe(
-        product_info = sephora.product_info,
-        table_type = "products"
-    )
+    get_sephora_products()
