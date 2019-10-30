@@ -52,7 +52,7 @@ def get_sephora_products():
     # for each subcategory page, get links to all product pages
     for i, subcategory in enumerate(sephora.subcategory_links):
         logging.info(f"getting product links for subcategory {i+1}/{n_subcategories} -> {subcategory}")
-        sephora.get_product_links(subcategory)
+        sephora.get_product_links(subcategory, testing = True)
 
     n_products = len(sephora.product_links)
     logging.info(f"found {n_products} products\n\n")
@@ -72,6 +72,8 @@ def get_sephora_products():
         product_info = sephora.product_info,
         table_type = "products"
     )
+
+    logging.info(f"missing inci for {sephora.missing_products} products")
 
 
 
@@ -97,6 +99,7 @@ class Sephora:
         self.subcategory_links = []
         self.product_links = set()
         self.product_info = []
+        self.missing_products = 0
 
 
     def get_subcategory_links(self, category_name: str):
@@ -289,7 +292,13 @@ class Sephora:
         final_ingredients = None
         if len(product_details) > 2:
             raw_ingredients = product_details[2]
-            final_ingredients = self.find_ingredients(raw_ingredients)
+            try:
+                final_ingredients = self.find_ingredients(raw_ingredients)
+            except:
+                final_ingredients = None
+
+        if not final_ingredients:
+            self.missing_products += 1
 
         # convert the ingredient string to a list of formatted ingredients
         formatted_ingredients = self.format_ingredients(
@@ -362,32 +371,86 @@ class Sephora:
 
         ingredients = None
 
-        # sometimes the ingredients are the very first thing in the section
-        # assume this is the case if the first thing contains >10 commas
-        first_item = next(raw_ingredients.children, None).string
+        # define patterns that may occur after the ingredient list
+        stop_pattern = re.compile(
+            r"the ingredients|free of|clean at sephora|vegan|gluten|evaluated|may change|^\*|^\+",
+            re.IGNORECASE
+        )
 
-        if first_item:
-            if first_item.count(",") >= 10:
-                ingredients = first_item
+        # case when ingredients are the first and only item
+        if not raw_ingredients.br:
+            ingredients = next(raw_ingredients.children, None).string
 
-            elif raw_ingredients.br:
-                ingredients = raw_ingredients.br
+        # case when there are multiple items in the details sections
+        else:
+            # start with the first item
+            item_after_ingredients = raw_ingredients.br
 
-                # loop until we locate the ingredient list
-                finished = False
-                while not finished:
-                    try:
-                        ingredients = ingredients.next_sibling
+            # move through the details until we find ingredients
+            finished = False
+            while not finished:
+                item_after_ingredients = item_after_ingredients.next_sibling
 
-                        if not isinstance(ingredients, bs4.element.NavigableString):
-                            continue
+                # if no next_sibling, quit
+                if not item_after_ingredients or item_after_ingredients == "":
+                    finished = True
+                    continue
 
-                        if ingredients.count(",") < 10:
-                            continue
-                    except:
-                        logging.info(f"---------------> FAILED TO FIND INGREDIENTS")
+                # check for patterns that indicate we've passed the ingredients
+                if isinstance(item_after_ingredients, bs4.element.Tag):
+                    if stop_pattern.search(item_after_ingredients.text):
+                        finished = True
+
+                elif isinstance(item_after_ingredients, bs4.element.NavigableString):
+                    if stop_pattern.search(item_after_ingredients):
+                        finished = True
+
+                # if there's more to look at, keep going
+                if item_after_ingredients.next_sibling:
+                    continue
+
+                # if we haven't found a stop_pattern and there's nothing left
+                # assume we've found the ingredients (i.e. ingredients are last)
+                else:
+                    ingredients = item_after_ingredients
+
+                    if isinstance(ingredients, bs4.element.Tag):
+                        if ingredients.text == "":
+                            ingredients = None
 
                     finished = True
+
+
+            # if we found the item_after_ingredients but not the ingredients
+            # take the first previous_sibling that is not a new line character
+            if item_after_ingredients and not ingredients:
+                ingredients = item_after_ingredients
+                finished = False
+                while not finished:
+                    if not ingredients.previous_sibling:
+                        finished = True
+                        continue
+
+                    ingredients = ingredients.previous_sibling
+
+                    if isinstance(ingredients, bs4.element.NavigableString):
+                        if ingredients == '\n' or ingredients == " " or ingredients == "<br/>":
+                            continue
+                        else:
+                            finished = True
+
+        # case when details don't contain ingredients, but do contain other info
+        if isinstance(ingredients, bs4.element.Tag):
+            if stop_pattern.search(ingredients.text):
+                ingredients = None
+
+        if isinstance(ingredients, bs4.element.NavigableString):
+            if stop_pattern.search(ingredients):
+                ingredients = None
+
+        # if none of that worked, we failed :-(
+        if not ingredients or ingredients == "\n":
+            logging.info("-------------FAILED TO FIND INGREDIENTS-------------")
 
         return ingredients
 
@@ -418,18 +481,7 @@ class Sephora:
         if not raw_ingredients:
             return [None]
 
-        # remove the language that can appear at the end of inci lists
-        match = "Clean at Sephora products are formulated without:"
-        raw_ingredients = raw_ingredients.split(match, 1)[0]
-
-        match = "This product is vegan and gluten-free."
-        raw_ingredients = raw_ingredients.replace(match, "")
-
-        match = "These statements have not been evaluated"
-        raw_ingredients = raw_ingredients.split(match, 1)[0]
-
-        match = "Please be aware that ingredient lists may change"
-        raw_ingredients = raw_ingredients.split(match, 1)[0]
+        raw_ingredients = str(raw_ingredients)
 
         # remove parentheticals
         # e.g. Titanium Dioxide (CI 77891) -> Titanium Dioxide
