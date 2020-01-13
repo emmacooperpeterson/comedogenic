@@ -2,21 +2,69 @@ import pandas as pd
 import requests
 import bs4
 
-page = requests.get("https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:01996D0335-20060209")
-soup = bs4.BeautifulSoup(page.content, "html.parser")
-table = soup.find("tbody")
 
-data = []
-rows = table.find_all('tr')
-for row in rows:
-    try:
+def get_page():
+    url = "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:01996D0335-20060209"
+    page = requests.get(url)
+    soup = bs4.BeautifulSoup(page.content, "html.parser")
+    return soup
+
+
+def make_ingredient_table(soup):
+    table = soup.find("tbody")
+    rows = table.find_all('tr')
+
+    data = []
+    for row in rows:
         cols = row.find_all('td')
-        cols = [ele.text.strip() for ele in cols]
-        data.append([ele for ele in cols if ele]) # Get rid of empty values
-    except:
-        continue
+        cols = [c.text.strip() for c in cols]
+        data.append(cols) # drop empty values
 
-df = pd.DataFrame(data)
-new_header = df.iloc[0] #grab the first row for the header
-df = df[1:] #take the data less the header row
-df.columns = new_header #set the header row as the df header
+    inci_df = pd.DataFrame(data)[1:] # remove headers from first row
+    inci_df = inci_df[[0, 5, 7]]
+    inci_df.columns = ["name", "description", "function"]
+
+    # uppercase the functions so they align with the category table
+    inci_df["function"] = inci_df["function"].str.upper()
+
+    # the "function" column lists all relevant functions, separated by "/"
+    # below, we separate each function into its own column, and then gather
+    # right now, the max number of functions for an ingredient is 11
+    functions = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+    inci_df[functions] = inci_df.function.str.split("/", expand = True)
+
+    inci_df = pd.melt(
+        inci_df,
+        id_vars = ['name', "description"],
+        value_vars = functions,
+        var_name ='function_number',
+        value_name ='function'
+    )
+
+    return inci_df
+
+
+def make_category_table(soup):
+    categories = soup.find_all("p", class_ = "norm")[47:173]
+
+    category_names = []
+    category_descriptions = []
+    for c in categories:
+        text = c.text
+        if text.upper() == text: # the names are all uppercase
+            category_names.append(text)
+        else:
+            category_descriptions.append(text)
+
+    category_df = pd.DataFrame(
+        list(zip(category_names, category_descriptions)),
+        columns =['category', 'description']
+    )
+
+    return category_df
+
+
+if __name__ == '__main__':
+    soup = get_page()
+    inci_df = make_ingredient_table(soup)
+    category_df = make_category_table(soup)
