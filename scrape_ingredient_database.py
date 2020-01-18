@@ -10,7 +10,21 @@ def get_page():
     return soup
 
 
-def make_ingredient_table(soup):
+def make_ingredient_table(soup) -> pd.DataFrame:
+    """
+    Description
+    -----------
+    Find the HTML table of ingredient descriptions, parse it into a DataFrame,
+    and save a .csv
+
+    Parameters
+    ----------
+    soup: bs4 object returned by bs4.BeautifulSoup()
+
+    Returns
+    -------
+    inci_df: DataFrame
+    """
     table = soup.find("tbody")
     rows = table.find_all('tr')
 
@@ -41,10 +55,25 @@ def make_ingredient_table(soup):
         value_name ='function'
     )
 
+    inci_df.to_csv("data/inci_descriptions.csv", index = False)
     return inci_df
 
 
-def make_category_table(soup):
+def make_category_table(soup) -> pd.DataFrame:
+    """
+    Description
+    -----------
+    Find the list of ingredient categories, parse it into a DataFrame,
+    and save a .csv
+
+    Parameters
+    ----------
+    soup: bs4 object returned by bs4.BeautifulSoup()
+
+    Returns
+    -------
+    category_df: DataFrame
+    """
     categories = soup.find_all("p", class_ = "norm")[47:173]
 
     category_names = []
@@ -61,6 +90,7 @@ def make_category_table(soup):
         columns =['category', 'description']
     )
 
+    category_df.to_csv("data/inci_categories.csv", index = False)
     return category_df
 
 
